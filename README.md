@@ -171,3 +171,7 @@ GitHub에서 자동으로 만들 수도 있습니다(`.github/workflows/desktop.
 - 코드 서명·공증(Apple notarization, Windows 인증서)이 없어 첫 실행 때 OS 경고가
   나옵니다. 배포용으로 쓰려면 인증서를 받아 electron-builder 서명 설정을 추가하세요.
 - 사용자·권한 관리가 없습니다(PC 한 대에서 쓰는 테스트 도구).
+
+## 라이선스
+
+[MIT](LICENSE)
