@@ -5,7 +5,7 @@ import { api, qs } from "../api";
 import { act, useBoot, usePoll } from "../store";
 import { fmtNum, fmtTime } from "../format";
 import { LineChart, type Band, type Series } from "../components/LineChart";
-import { Check, Collapsible, ConfigForm, Empty, SevPill, Stat, StatePill } from "../components/ui";
+import { Check, Collapsible, ConfigForm, Empty, ExportLink, SevPill, Stat, StatePill } from "../components/ui";
 
 interface Summary {
   counters: { runs: number; faults: number; interlocks: number; samples: number };
@@ -222,9 +222,9 @@ export function FdcView() {
                   ))}
                 </select>
                 <Check label={`${S.fdc.compare} (${prev.length})`} checked={compare} onChange={setCompare} />
-                <a className="btn small" href={`/api/fdc/runs/${encodeURIComponent(run.runId)}/csv`}>
+                <ExportLink className="btn small" path={`/api/fdc/runs/${encodeURIComponent(run.runId)}/csv`}>
                   {S.fdc.csv}
-                </a>
+                </ExportLink>
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {run.eqpId}/{run.chamberId} · {run.recipeId} · {S.common.lot} {run.lotId} · {run.waferIds.join(", ")} · <StatePill state={run.status} />

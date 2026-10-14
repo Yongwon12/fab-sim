@@ -3,7 +3,7 @@ import type { EquipmentConfig } from "../../../shared/types";
 import { S } from "../../strings";
 import { useBoot } from "../../store";
 import { fmtTime } from "../../format";
-import { Empty } from "../../components/ui";
+import { Empty, ExportLink } from "../../components/ui";
 import type { EquipmentFeed } from "./feed";
 
 export function EventsPanel({ cfg, feed, version }: { cfg: EquipmentConfig; feed: EquipmentFeed; version: number }) {
@@ -25,9 +25,9 @@ export function EventsPanel({ cfg, feed, version }: { cfg: EquipmentConfig; feed
             </option>
           ))}
         </select>
-        <a className="btn small" href={`/api/export/events.csv?eqpId=${encodeURIComponent(cfg.id)}`}>
+        <ExportLink className="btn small" path={`/api/export/events.csv?eqpId=${encodeURIComponent(cfg.id)}`}>
           CSV
-        </a>
+        </ExportLink>
       </div>
       <p className="muted" style={{ margin: "0 0 8px" }}>
         {S.events.hint}

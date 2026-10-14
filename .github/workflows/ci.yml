@@ -27,3 +27,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npx vite build
+      - name: Build the standalone single-file app
+        if: matrix.node == '22.12'
+        run: npm run build:standalone
+      - uses: actions/upload-artifact@v4
+        if: matrix.node == '22.12'
+        with:
+          name: fab-sim-html
+          path: dist/fab-sim.html

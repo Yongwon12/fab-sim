@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { E10State, Severity } from "../../shared/types";
 import { S } from "../strings";
 import { fmtDuration, fmtTime } from "../format";
+import { STANDALONE, downloadExport } from "../api";
 
 export const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
 
@@ -272,5 +273,28 @@ export function ConfigForm<T extends object>({ value, fields, onSave }: { value:
         </button>
       </div>
     </div>
+  );
+}
+
+/** A link to a text export; in the standalone build the file is made in the page. */
+export function ExportLink({ path, className = "btn", children }: { path: string; className?: string; children: ReactNode }) {
+  if (!STANDALONE) {
+    return (
+      <a className={className} href={path}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a
+      className={className}
+      href={path}
+      onClick={(e) => {
+        e.preventDefault();
+        void downloadExport(path);
+      }}
+    >
+      {children}
+    </a>
   );
 }

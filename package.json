@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/server/main.ts --dev",
     "build": "tsc --noEmit && vite build",
+    "build:standalone": "vite build --mode standalone && node scripts/inline-standalone.mjs",
     "start": "tsx src/server/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

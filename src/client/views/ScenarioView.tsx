@@ -4,7 +4,7 @@ import { S } from "../strings";
 import { api } from "../api";
 import { act, go, store, toasts, useBoot, useLive } from "../store";
 import { download } from "../format";
-import { Empty, VendorTag } from "../components/ui";
+import { Empty, ExportLink, VendorTag } from "../components/ui";
 
 export function ScenarioView() {
   const boot = useBoot()!;
@@ -192,12 +192,8 @@ export function ScenarioView() {
           <div className="card stack">
             <h3>{S.scenario.exports}</h3>
             <div className="row">
-              <a className="btn" href="/api/export/events.csv">
-                {S.scenario.eventsCsv}
-              </a>
-              <a className="btn" href="/api/export/scenario.json">
-                scenario.json
-              </a>
+              <ExportLink path="/api/export/events.csv">{S.scenario.eventsCsv}</ExportLink>
+              <ExportLink path="/api/export/scenario.json">scenario.json</ExportLink>
             </div>
             <p className="muted" style={{ margin: 0 }}>
               Trace CSV: FDC → Run → {S.fdc.csv}

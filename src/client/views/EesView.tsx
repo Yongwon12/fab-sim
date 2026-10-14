@@ -4,7 +4,7 @@ import { S } from "../strings";
 import { api, qs } from "../api";
 import { act, useBoot, usePoll } from "../store";
 import { fmtDuration, fmtNum, fmtPct, fmtTime } from "../format";
-import { Collapsible, ConfigForm, E10Legend, E10Pill, E10Stack, E10Timeline, E10_ORDER, Empty, Seg, Stat, StatePill, VendorTag } from "../components/ui";
+import { Collapsible, ConfigForm, E10Legend, E10Pill, E10Stack, E10Timeline, E10_ORDER, Empty, ExportLink, Seg, Stat, StatePill, VendorTag } from "../components/ui";
 
 interface Kpi {
   eqpId: string;
@@ -88,9 +88,7 @@ export function EesView() {
     <div className="page">
       <div className="page-head">
         <h2>{S.ees.title}</h2>
-        <a className="btn" href="/api/export/events.csv">
-          {S.ees.exportCsv}
-        </a>
+        <ExportLink path="/api/export/events.csv">{S.ees.exportCsv}</ExportLink>
       </div>
       {fleet && (
         <div className="grid tiles">

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CommandAction, Envelope, EquipmentConfig, EquipmentStatus, FaultInjection, SimStatus, VendorId, EquipmentType, EventName } from "../shared/types";
 import { topicMatches } from "../shared/topics";
-import { api } from "./api";
+import { api, STANDALONE } from "./api";
+import type { Feed } from "../server/core";
 
 // Client state: the bootstrap data (configs, catalogs), the live WebSocket
 // feed (sim status, equipment status, streamed messages) and small hooks.
@@ -51,6 +52,7 @@ class Store {
   private subs = new Map<number, { patterns: string[]; fn: (m: Envelope[]) => void }>();
   private subSeq = 0;
   private ws: WebSocket | null = null;
+  private feed: Feed | null = null;
   private retry = 0;
 
   subscribe = (l: Listener) => {
@@ -74,6 +76,10 @@ class Store {
   }
 
   connect() {
+    if (STANDALONE) {
+      void this.connectLocal();
+      return;
+    }
     if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -84,21 +90,7 @@ class Store {
       this.sendSubscriptions();
       this.emit();
     };
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === "status") {
-        this.live = { connected: true, sim: msg.sim, status: msg.status, alarms: msg.alarms };
-        this.emit();
-      } else if (msg.type === "messages") {
-        for (const sub of this.subs.values()) {
-          const mine = (msg.messages as Envelope[]).filter((m) => sub.patterns.some((p) => topicMatches(p, m.topic)));
-          if (mine.length) sub.fn(mine);
-        }
-      } else if (msg.type === "hello") {
-        this.live = { ...this.live, sim: msg.sim };
-        this.emit();
-      }
-    };
+    ws.onmessage = (ev) => this.onMessage(JSON.parse(ev.data));
     ws.onclose = () => {
       this.live = { ...this.live, connected: false };
       this.emit();
@@ -107,9 +99,36 @@ class Store {
     };
   }
 
+  /** Standalone build: the same feed, straight from the fab running in this page. */
+  private async connectLocal() {
+    if (this.feed) return;
+    const { localCore } = await import("./local");
+    if (this.feed) return;
+    this.feed = localCore().openFeed((data) => this.onMessage(JSON.parse(JSON.stringify(data))));
+    this.live = { ...this.live, connected: true };
+    this.sendSubscriptions();
+    this.emit();
+  }
+
+  private onMessage(msg: any) {
+    if (msg.type === "status") {
+      this.live = { connected: true, sim: msg.sim, status: msg.status, alarms: msg.alarms };
+      this.emit();
+    } else if (msg.type === "messages") {
+      for (const sub of this.subs.values()) {
+        const mine = (msg.messages as Envelope[]).filter((m) => sub.patterns.some((p) => topicMatches(p, m.topic)));
+        if (mine.length) sub.fn(mine);
+      }
+    } else if (msg.type === "hello") {
+      this.live = { ...this.live, sim: msg.sim };
+      this.emit();
+    }
+  }
+
   private sendSubscriptions() {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
     const topics = [...new Set([...this.subs.values()].flatMap((s) => s.patterns))];
+    if (this.feed) this.feed.setTopics(topics);
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ type: "subscribe", topics }));
   }
 
