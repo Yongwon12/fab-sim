@@ -56,11 +56,12 @@ npm run dist:mac       # macOS에서: release/FAB-SIM-<버전>-mac-universal.dmg
 npm run dist:win       # Windows에서: release/…-windows-setup.exe, …-windows-portable.exe
 ```
 
-GitHub에서 자동으로 만들 수도 있습니다. `v0.2.0` 처럼 `v`로 시작하는 태그를 push하면
-GitHub Actions가 macOS·Windows 설치 파일을 빌드해 Release에 올립니다
-(`.github/workflows/desktop.yml`). 태그 없이 만들려면 Actions 탭에서
-**Desktop apps → Run workflow**를 누르면 되고, 결과 파일은 실행 기록의 Artifacts에
-올라갑니다.
+GitHub에서 자동으로 만들 수도 있습니다(`.github/workflows/desktop.yml`).
+
+- Actions 탭 → **Desktop apps → Run workflow**에서 release 칸에 `v0.2.0` 처럼
+  버전을 적고 실행하면, macOS·Windows 설치 파일을 빌드해 그 이름의 Release로
+  올립니다. 칸을 비우면 빌드만 하고 결과 파일은 실행 기록의 Artifacts에 남습니다.
+- `v`로 시작하는 태그를 push해도 같은 빌드와 Release가 만들어집니다.
 
 | 폴더 | 내용 |
 |---|---|
