@@ -36,6 +36,7 @@
   "productName": "FAB-SIM",
   "main": "dist/desktop/main.cjs",
   "author": "Yongwon12",
+  "license": "MIT",
   "build": {
     "appId": "io.github.yongwon12.fabsim",
     "productName": "FAB-SIM",
