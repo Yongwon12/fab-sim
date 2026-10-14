@@ -50,8 +50,7 @@ class Store {
   private listeners = new Set<Listener>();
   private subs = new Map<number, { patterns: string[]; fn: (m: Envelope[]) => void }>();
   private subSeq = 0;
-  private ws: WebSocket | null = null;
-  private retry = 0;
+  private connected = false;
 
   subscribe = (l: Listener) => {
     this.listeners.add(l);
@@ -74,43 +73,33 @@ class Store {
   }
 
   connect() {
-    if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws`);
-    this.ws = ws;
-    ws.onopen = () => {
-      this.retry = 0;
-      this.live = { ...this.live, connected: true };
-      this.sendSubscriptions();
+    if (this.connected) return;
+    const bridge = window.fabsim;
+    if (!bridge) {
+      this.bootError = "FAB-SIM 데스크톱 앱에서 실행하세요 (브라우저에서는 동작하지 않습니다).";
       this.emit();
-    };
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
+      return;
+    }
+    this.connected = true;
+    bridge.onPush((raw) => {
+      const msg = raw as { type: string; sim?: SimStatus; status?: EquipmentStatus[]; alarms?: LiveState["alarms"]; messages?: Envelope[] };
       if (msg.type === "status") {
-        this.live = { connected: true, sim: msg.sim, status: msg.status, alarms: msg.alarms };
+        this.live = { connected: true, sim: msg.sim!, status: msg.status!, alarms: msg.alarms! };
         this.emit();
       } else if (msg.type === "messages") {
         for (const sub of this.subs.values()) {
-          const mine = (msg.messages as Envelope[]).filter((m) => sub.patterns.some((p) => topicMatches(p, m.topic)));
+          const mine = msg.messages!.filter((m) => sub.patterns.some((p) => topicMatches(p, m.topic)));
           if (mine.length) sub.fn(mine);
         }
-      } else if (msg.type === "hello") {
-        this.live = { ...this.live, sim: msg.sim };
-        this.emit();
       }
-    };
-    ws.onclose = () => {
-      this.live = { ...this.live, connected: false };
-      this.emit();
-      const delay = Math.min(5000, 500 * 2 ** this.retry++);
-      setTimeout(() => this.connect(), delay);
-    };
+    });
+    this.sendSubscriptions();
   }
 
   private sendSubscriptions() {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    if (!this.connected) return;
     const topics = [...new Set([...this.subs.values()].flatMap((s) => s.patterns))];
-    this.ws.send(JSON.stringify({ type: "subscribe", topics }));
+    window.fabsim?.subscribe(topics);
   }
 
   listen(patterns: string[], fn: (m: Envelope[]) => void): () => void {

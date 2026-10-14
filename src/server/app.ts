@@ -1,7 +1,5 @@
-import type { IncomingMessage, ServerResponse, Server } from "node:http";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
-import { WebSocketServer, type WebSocket } from "ws";
 import type { CommandAction, CommandPayload, Envelope, FaultInjection, VendorId, EquipmentType } from "../shared/types";
 import { EVENT_NAMES } from "../shared/types";
 import { topicMatches, topics } from "../shared/topics";
@@ -23,13 +21,29 @@ export interface AppOptions {
   autostart?: boolean;
 }
 
-class HttpError extends Error {
+export class RequestError extends Error {
   constructor(
     public status: number,
     message: string,
   ) {
     super(message);
   }
+}
+
+export interface DispatchResult {
+  status: number;
+  data: unknown;
+}
+
+export interface ExportFile {
+  name: string;
+  type: string;
+  body: string;
+}
+
+export interface LiveSession {
+  subscribe(topics: string[]): void;
+  close(): void;
 }
 
 type Params = Record<string, string>;
@@ -74,7 +88,6 @@ export class FabApp {
   private routes: Route[] = [];
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private systemTimer: ReturnType<typeof setInterval> | null = null;
-  private wss: WebSocketServer | null = null;
 
   constructor(private opts: AppOptions) {
     // Systems subscribe first so they see the master data the simulator publishes on load.
@@ -108,7 +121,6 @@ export class FabApp {
   stop() {
     this.sim.pause();
     if (this.systemTimer) clearInterval(this.systemTimer);
-    this.wss?.close();
     this.flushSave();
   }
 
@@ -151,13 +163,13 @@ export class FabApp {
   }
 
   applyScenario(s: Scenario, resetRuntime = true) {
-    if (!s || s.version !== 1 || !Array.isArray(s.equipment)) throw new HttpError(400, "Not a fab-sim scenario (version 1)");
+    if (!s || s.version !== 1 || !Array.isArray(s.equipment)) throw new RequestError(400, "Not a fab-sim scenario (version 1)");
     const equipment = s.equipment.map((e) => normalizeEquipment(e));
     const ids = new Set<string>();
     for (const e of equipment) {
       const errors = validateEquipment(e);
-      if (errors.length) throw new HttpError(400, `${e.id}: ${errors.join("; ")}`);
-      if (ids.has(e.id)) throw new HttpError(400, `Duplicate equipment id ${e.id}`);
+      if (errors.length) throw new RequestError(400, `${e.id}: ${errors.join("; ")}`);
+      if (ids.has(e.id)) throw new RequestError(400, `Duplicate equipment id ${e.id}`);
       ids.add(e.id);
     }
     if (resetRuntime) for (const sys of this.systems) sys.reset();
@@ -216,7 +228,7 @@ export class FabApp {
     const now = () => sim.now();
     const eqp = (id: string) => {
       const cfg = sim.config(id);
-      if (!cfg) throw new HttpError(404, `Unknown equipment ${id}`);
+      if (!cfg) throw new RequestError(404, `Unknown equipment ${id}`);
       return cfg;
     };
     const str = (q: Query, k: string) => q.get(k) || undefined;
@@ -269,7 +281,7 @@ export class FabApp {
     });
     r("POST", "/api/equipment", ({ body }) => {
       const id = String(body.id ?? "").trim();
-      if (sim.has(id)) throw new HttpError(409, `Equipment ${id} already exists`);
+      if (sim.has(id)) throw new RequestError(409, `Equipment ${id} already exists`);
       const cfg = createEquipmentFromTemplate({
         id,
         type: body.type as EquipmentType,
@@ -280,7 +292,7 @@ export class FabApp {
       });
       if (Array.isArray(body.chambers) && body.chambers.length) cfg.generation.lotIntervalSec = suggestedLotInterval(cfg);
       const errors = validateEquipment(cfg);
-      if (errors.length) throw new HttpError(400, errors.join("; "));
+      if (errors.length) throw new RequestError(400, errors.join("; "));
       sim.addEquipment(cfg);
       this.scheduleSave();
       return cfg;
@@ -289,7 +301,7 @@ export class FabApp {
       const current = eqp(params.id);
       const cfg = normalizeEquipment({ ...body, id: current.id, type: current.type, vendor: body.vendor ?? current.vendor });
       const errors = validateEquipment(cfg);
-      if (errors.length) throw new HttpError(400, errors.join("; "));
+      if (errors.length) throw new RequestError(400, errors.join("; "));
       sim.updateEquipment(cfg);
       this.scheduleSave();
       return cfg;
@@ -303,14 +315,14 @@ export class FabApp {
     r("POST", "/api/equipment/:id/command", ({ params, body }) => {
       eqp(params.id);
       const action = String(body.action) as CommandAction;
-      if (!COMMAND_ACTIONS.includes(action)) throw new HttpError(400, `Unknown action ${action}`);
+      if (!COMMAND_ACTIONS.includes(action)) throw new RequestError(400, `Unknown action ${action}`);
       return sim.command(params.id, { action, args: body.args ?? {}, origin: "LOCAL", requestedBy: "OPERATOR" });
     });
     // Send a command the way a host system would: over the bus, needs ONLINE_REMOTE.
     r("POST", "/api/equipment/:id/host-command", ({ params, body }) => {
       eqp(params.id);
       const action = String(body.action) as CommandAction;
-      if (!COMMAND_ACTIONS.includes(action)) throw new HttpError(400, `Unknown action ${action}`);
+      if (!COMMAND_ACTIONS.includes(action)) throw new RequestError(400, `Unknown action ${action}`);
       const cmd: CommandPayload = { eqpId: params.id, action, args: body.args ?? {}, origin: "HOST", requestedBy: "HOST-UI" };
       this.bus.publish(topics.command(params.id), "command", "HOST-UI", cmd, now());
       const last = sim.link(params.id)!.frames().filter((f) => f.kind === "command").pop();
@@ -336,11 +348,11 @@ export class FabApp {
     r("POST", "/api/faults", ({ body }) => {
       const cfg = eqp(String(body.eqpId));
       const param = String(body.param);
-      if (!cfg.parameters.some((p) => p.key === param)) throw new HttpError(400, `Unknown parameter ${param}`);
+      if (!cfg.parameters.some((p) => p.key === param)) throw new RequestError(400, `Unknown parameter ${param}`);
       const chamberId = String(body.chamberId ?? "*");
-      if (chamberId !== "*" && !cfg.chambers.includes(chamberId)) throw new HttpError(400, `Unknown chamber ${chamberId}`);
+      if (chamberId !== "*" && !cfg.chambers.includes(chamberId)) throw new RequestError(400, `Unknown chamber ${chamberId}`);
       const type = String(body.type) as FaultInjection["type"];
-      if (!["SHIFT", "DRIFT", "SPIKE", "NOISE", "STUCK", "DROPOUT"].includes(type)) throw new HttpError(400, "Unknown fault type");
+      if (!["SHIFT", "DRIFT", "SPIKE", "NOISE", "STUCK", "DROPOUT"].includes(type)) throw new RequestError(400, "Unknown fault type");
       const f = sim.addFault({
         eqpId: cfg.id,
         chamberId,
@@ -362,12 +374,12 @@ export class FabApp {
       for (const k of ["enabled", "processOnly"] as const) if (body[k] !== undefined) patch[k] = Boolean(body[k]);
       if (body.note !== undefined) patch.note = String(body.note);
       const f = sim.updateFault(params.id, patch);
-      if (!f) throw new HttpError(404, "Unknown fault");
+      if (!f) throw new RequestError(404, "Unknown fault");
       this.scheduleSave();
       return f;
     });
     r("DELETE", "/api/faults/:id", ({ params }) => {
-      if (!sim.removeFault(params.id)) throw new HttpError(404, "Unknown fault");
+      if (!sim.removeFault(params.id)) throw new RequestError(404, "Unknown fault");
       this.scheduleSave();
       return { ok: true };
     });
@@ -379,8 +391,8 @@ export class FabApp {
       recent: this.bus.recent(int(query, "limit", 120)).reverse(),
     }));
     r("PATCH", "/api/bus/routes", ({ body }) => {
-      if (body.subscriber === "EQUIPMENT") throw new HttpError(400, "The equipment command route cannot be switched off");
-      if (!this.bus.setRouteEnabled(String(body.subscriber), String(body.pattern), Boolean(body.enabled))) throw new HttpError(404, "Unknown route");
+      if (body.subscriber === "EQUIPMENT") throw new RequestError(400, "The equipment command route cannot be switched off");
+      if (!this.bus.setRouteEnabled(String(body.subscriber), String(body.pattern), Boolean(body.enabled))) throw new RequestError(404, "Unknown route");
       this.scheduleSave();
       return this.bus.routes();
     });
@@ -414,7 +426,7 @@ export class FabApp {
     );
     r("GET", "/api/fdc/runs/:runId", ({ params }) => {
       const run = this.fdc.getRun(params.runId);
-      if (!run) throw new HttpError(404, "Unknown run (only the latest runs per chamber are kept)");
+      if (!run) throw new RequestError(404, "Unknown run (only the latest runs per chamber are kept)");
       return run;
     });
     r("GET", "/api/fdc/faults", ({ query }) => this.fdc.listFaults({ eqpId: str(query, "eqpId"), limit: int(query, "limit", 200) }));
@@ -429,7 +441,7 @@ export class FabApp {
     );
     r("GET", "/api/fdc/trend", ({ query }) => {
       const t = this.fdc.trend(String(query.get("key")));
-      if (!t) throw new HttpError(404, "Unknown model");
+      if (!t) throw new RequestError(404, "Unknown model");
       return t;
     });
     r("PATCH", "/api/fdc/models", ({ body }) => {
@@ -439,11 +451,11 @@ export class FabApp {
           ucl: body.ucl === undefined ? undefined : Number(body.ucl),
           state: body.state,
         });
-        if (!t) throw new HttpError(404, "Unknown model");
+        if (!t) throw new RequestError(404, "Unknown model");
         return t;
       } catch (err) {
-        if (err instanceof HttpError) throw err;
-        throw new HttpError(400, (err as Error).message);
+        if (err instanceof RequestError) throw err;
+        throw new RequestError(400, (err as Error).message);
       }
     });
     r("POST", "/api/fdc/relearn", ({ body }) => ({ models: this.fdc.relearn({ eqpId: body.eqpId, chamberId: body.chamberId, recipeId: body.recipeId }) }));
@@ -473,7 +485,7 @@ export class FabApp {
     r("GET", "/api/qms/charts", ({ query }) => this.qms.listCharts({ eqpId: str(query, "eqpId") }));
     r("GET", "/api/qms/chart", ({ query }) => {
       const c = this.qms.getChart(String(query.get("key")), int(query, "limit", 200));
-      if (!c) throw new HttpError(404, "Unknown chart");
+      if (!c) throw new RequestError(404, "Unknown chart");
       return c;
     });
     r("PATCH", "/api/qms/chart", ({ body }) => {
@@ -488,22 +500,22 @@ export class FabApp {
           lcl: body.lcl === undefined ? undefined : Number(body.lcl),
           relearn: Boolean(body.relearn),
         });
-        if (!c) throw new HttpError(404, "Unknown chart");
+        if (!c) throw new RequestError(404, "Unknown chart");
         this.scheduleSave();
         return c;
       } catch (err) {
-        if (err instanceof HttpError) throw err;
-        throw new HttpError(400, (err as Error).message);
+        if (err instanceof RequestError) throw err;
+        throw new RequestError(400, (err as Error).message);
       }
     });
     r("GET", "/api/qms/lots", ({ query }) => this.qms.listLots({ eqpId: str(query, "eqpId"), status: str(query, "status"), limit: int(query, "limit", 200) }));
     r("POST", "/api/qms/lots/:lotId/disposition", ({ params, body }) => {
       const status = String(body.status);
-      if (!["RELEASED", "SCRAPPED", "REWORK"].includes(status)) throw new HttpError(400, "status: RELEASED, SCRAPPED or REWORK");
+      if (!["RELEASED", "SCRAPPED", "REWORK"].includes(status)) throw new RequestError(400, "status: RELEASED, SCRAPPED or REWORK");
       try {
         return this.qms.disposition(params.lotId, status as "RELEASED", String(body.by ?? "QE"), now(), body.note ? String(body.note) : "");
       } catch (err) {
-        throw new HttpError(400, (err as Error).message);
+        throw new RequestError(400, (err as Error).message);
       }
     });
     r("GET", "/api/qms/config", () => this.qms.config);
@@ -566,50 +578,48 @@ export class FabApp {
     try {
       return fn();
     } catch (err) {
-      throw new HttpError(400, (err as Error).message);
+      throw new RequestError(400, (err as Error).message);
     }
   }
 
-  /** Text exports that are not JSON. */
-  private exportText(path: string, query: Query): { type: string; name: string; body: string } | null {
+  /** File exports (CSV/JSON): the desktop shell writes them where the user chooses. */
+  exportFile(url: string): ExportFile {
+    const { pathname: path, searchParams: query } = new URL(url, "app://fab-sim");
     const m = path.match(/^\/api\/fdc\/runs\/([^/]+)\/csv$/);
     if (m) {
-      const csv = this.fdc.runCsv(decodeURIComponent(m[1]));
-      if (!csv) throw new HttpError(404, "Unknown run");
-      return { type: "text/csv", name: `${decodeURIComponent(m[1])}.csv`, body: csv };
+      const runId = decodeURIComponent(m[1]);
+      const csv = this.fdc.runCsv(runId);
+      if (!csv) throw new RequestError(404, "Unknown run");
+      return { type: "text/csv", name: `${runId}.csv`, body: csv };
     }
     if (path === "/api/export/events.csv") {
-      const events = this.ees.listEvents({ eqpId: query.get("eqpId") || undefined, limit: 5000 }).reverse();
+      const eqpId = query.get("eqpId") || undefined;
+      const events = this.ees.listEvents({ eqpId, limit: 5000 }).reverse();
       const rows = events.map((e) =>
         [new Date(e.ts).toISOString(), e.eqpId, e.name, e.ceid, e.chamberId ?? "", csvCell(JSON.stringify(e.values)), csvCell(JSON.stringify(e.extra ?? {}))].join(","),
       );
-      return { type: "text/csv", name: "erd-events.csv", body: ["timestamp,eqp_id,event,ceid,chamber_id,report,extra_report", ...rows].join("\n") };
+      return {
+        type: "text/csv",
+        name: `erd-events${eqpId ? `-${eqpId}` : ""}.csv`,
+        body: ["timestamp,eqp_id,event,ceid,chamber_id,report,extra_report", ...rows].join("\n"),
+      };
     }
     if (path === "/api/export/scenario.json") {
       return { type: "application/json", name: "fab-sim-scenario.json", body: JSON.stringify(this.scenario(), null, 2) };
     }
-    return null;
+    throw new RequestError(404, `No export ${path}`);
   }
 
-  /** Returns false when the request is not an API call (static files take it). */
-  async handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (!url.pathname.startsWith("/api/")) return false;
+  /**
+   * One API call. The desktop shell forwards renderer requests here over IPC;
+   * there is no HTTP server and no network port.
+   */
+  async dispatch(method: string, url: string, body: unknown = {}): Promise<DispatchResult> {
     try {
-      if (req.method === "GET") {
-        const text = this.exportText(url.pathname, url.searchParams);
-        if (text) {
-          res.writeHead(200, {
-            "Content-Type": `${text.type}; charset=utf-8`,
-            "Content-Disposition": `attachment; filename="${text.name}"`,
-          });
-          res.end(text.body);
-          return true;
-        }
-      }
-      const parts = url.pathname.split("/").filter(Boolean);
+      const { pathname, searchParams } = new URL(url, "app://fab-sim");
+      const parts = pathname.split("/").filter(Boolean);
       for (const route of this.routes) {
-        if (route.method !== req.method || route.parts.length !== parts.length) continue;
+        if (route.method !== method || route.parts.length !== parts.length) continue;
         const params: Params = {};
         const ok = route.parts.every((p, i) => {
           if (p.startsWith(":")) {
@@ -619,32 +629,25 @@ export class FabApp {
           return p === parts[i];
         });
         if (!ok) continue;
-        const body = req.method === "GET" || req.method === "DELETE" ? {} : await readJson(req);
-        const result = await route.handler({ params, query: url.searchParams, body });
-        sendJson(res, 200, result ?? { ok: true });
-        return true;
+        const payload = body && typeof body === "object" ? body : {};
+        const result = await route.handler({ params, query: searchParams, body: payload });
+        return { status: 200, data: result ?? { ok: true } };
       }
-      throw new HttpError(404, `No route ${req.method} ${url.pathname}`);
+      throw new RequestError(404, `No route ${method} ${pathname}`);
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
+      const status = err instanceof RequestError ? err.status : 500;
       if (status === 500) console.error("[fab-sim]", err);
-      sendJson(res, status, { error: (err as Error).message });
-      return true;
+      return { status, data: { error: (err as Error).message } };
     }
   }
 
-  // ---------------------------------------------------------- websocket
+  // ------------------------------------------------------------ live feed
 
-  attachWebSocket(server: Server) {
-    const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-    this.wss = wss;
-    server.on("upgrade", (req, socket, head) => {
-      if (new URL(req.url ?? "/", "http://localhost").pathname !== "/ws") return;
-      wss.handleUpgrade(req, socket, head, (ws) => this.onClient(ws));
-    });
-  }
-
-  private onClient(ws: WebSocket) {
+  /**
+   * A UI window's live feed: equipment status twice a second and the
+   * messages of the topics it subscribed to, batched every 200 ms.
+   */
+  openSession(send: (msg: unknown) => void): LiveSession {
     let patterns: string[] = [];
     let queue: Envelope[] = [];
     let dropped = 0;
@@ -661,16 +664,13 @@ export class FabApp {
     const offBus = this.bus.tap((msg) => {
       if (BUS_TO_UI.has(msg.kind)) enqueue(msg);
     });
-    const send = (data: unknown) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(data));
-    };
     const flush = setInterval(() => {
       if (!queue.length && !dropped) return;
       send({ type: "messages", messages: queue, dropped });
       queue = [];
       dropped = 0;
     }, 200);
-    const status = setInterval(() => {
+    const pushStatus = () => {
       const ams = this.ams.stats();
       send({
         type: "status",
@@ -678,22 +678,20 @@ export class FabApp {
         status: this.sim.statuses(),
         alarms: { active: ams.active, critical: ams.criticalOpen, unacked: ams.active + ams.clearedUnacked },
       });
-    }, 500);
-    ws.on("message", (raw) => {
-      try {
-        const msg = JSON.parse(String(raw));
-        if (msg.type === "subscribe" && Array.isArray(msg.topics)) patterns = msg.topics.map(String).slice(0, 50);
-      } catch {
-        // ignore malformed client messages
-      }
-    });
-    ws.on("close", () => {
-      offLocal();
-      offBus();
-      clearInterval(flush);
-      clearInterval(status);
-    });
-    send({ type: "hello", sim: this.sim.status });
+    };
+    const status = setInterval(pushStatus, 500);
+    pushStatus();
+    return {
+      subscribe: (topicList) => {
+        patterns = topicList.map(String).slice(0, 50);
+      },
+      close: () => {
+        offLocal();
+        offBus();
+        clearInterval(flush);
+        clearInterval(status);
+      },
+    };
   }
 }
 
@@ -702,7 +700,7 @@ function pickNumbers(body: Record<string, unknown>, keys: string[]): Record<stri
   for (const k of keys) {
     if (body[k] === undefined) continue;
     const v = Number(body[k]);
-    if (!Number.isFinite(v)) throw new HttpError(400, `${k} must be a number`);
+    if (!Number.isFinite(v)) throw new RequestError(400, `${k} must be a number`);
     out[k] = v;
   }
   return out;
@@ -711,34 +709,3 @@ function pickNumbers(body: Record<string, unknown>, keys: string[]): Record<stri
 function csvCell(s: string) {
   return `"${s.replace(/"/g, '""')}"`;
 }
-
-function sendJson(res: ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(data));
-}
-
-function readJson(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => {
-      size += c.length;
-      if (size > 5 * 1024 * 1024) {
-        reject(new HttpError(413, "Body too large"));
-        req.destroy();
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      if (!chunks.length) return resolve({});
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        reject(new HttpError(400, "Invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-

@@ -1,40 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { FabApp } from "./app";
 
 let app: FabApp;
-let server: Server;
-let base = "";
 
-const call = async (method: string, path: string, body?: unknown) => {
-  const res = await fetch(base + path, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  return { status: res.status, data: text && res.headers.get("content-type")?.includes("json") ? JSON.parse(text) : text };
-};
+const call = async (method: string, path: string, body?: unknown) => app.dispatch(method, path, body) as Promise<{ status: number; data: any }>;
 
-beforeAll(async () => {
+beforeAll(() => {
   app = new FabApp({ scenarioFile: null, autostart: false });
-  server = createServer(async (req, res) => {
-    if (!(await app.handle(req, res))) {
-      res.statusCode = 404;
-      res.end();
-    }
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 afterAll(() => {
   app.stop();
-  server.close();
 });
 
-describe("REST API", () => {
+describe("app API (IPC dispatch)", () => {
   it("bootstraps the default mixed-vendor fab", async () => {
     const { status, data } = await call("GET", "/api/bootstrap");
     expect(status).toBe(200);
@@ -91,15 +70,34 @@ describe("REST API", () => {
   it("serves exports and system endpoints", async () => {
     await call("PATCH", "/api/bus/routes", { subscriber: "FDC", pattern: "eqp/+/trace/+", enabled: true });
     app.sim.runFor(10 * 60_000);
-    const csv = await call("GET", "/api/export/events.csv");
-    expect(String(csv.data).split("\n")[0]).toContain("timestamp,eqp_id,event");
+    const csv = app.exportFile("/api/export/events.csv?eqpId=ETCH-01");
+    expect(csv.name).toBe("erd-events-ETCH-01.csv");
+    expect(csv.body.split("\n")[0]).toContain("timestamp,eqp_id,event");
     for (const p of ["/api/ees/overview", "/api/fdc/summary", "/api/qms/summary", "/api/ams/stats", "/api/bus"]) {
       expect((await call("GET", p)).status, p).toBe(200);
     }
     const runs = (await call("GET", "/api/fdc/runs?limit=5")).data;
     expect(runs.length).toBeGreaterThan(0);
-    const trace = await call("GET", `/api/fdc/runs/${runs[0].runId}/csv`);
-    expect(String(trace.data)).toContain("run_id");
+    const trace = app.exportFile(`/api/fdc/runs/${runs[0].runId}/csv`);
+    expect(trace.body).toContain("run_id");
+    expect(() => app.exportFile("/api/fdc/runs/nope/csv")).toThrow();
     expect((await call("GET", "/api/nope")).status).toBe(404);
   });
 });
+
+describe("live session", () => {
+  it("pushes status and only the subscribed topics", () => {
+    const pushed: Array<{ type: string; messages?: Array<{ topic: string }> }> = [];
+    const session = app.openSession((m) => pushed.push(m as (typeof pushed)[number]));
+    expect(pushed[0].type).toBe("status");
+    session.subscribe(["eqp/ETCH-01/event"]);
+    app.sim.runFor(120_000);
+    return new Promise<void>((resolve) => setTimeout(resolve, 300)).then(() => {
+      session.close();
+      const topics = pushed.filter((m) => m.type === "messages").flatMap((m) => m.messages!.map((x) => x.topic));
+      expect(topics.length).toBeGreaterThan(0);
+      expect(new Set(topics)).toEqual(new Set(["eqp/ETCH-01/event"]));
+    });
+  });
+});
+

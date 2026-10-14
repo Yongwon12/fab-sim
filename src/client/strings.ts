@@ -8,8 +8,8 @@ export const S = {
     title: "FAB-SIM",
     subtitle: "반도체 설비 통합 UI · 테스트 시뮬레이터",
     testOnly: "테스트 전용 시뮬레이션",
-    connecting: "서버 연결 중…",
-    disconnected: "서버 연결 끊김 — 재연결 시도 중",
+    connecting: "시뮬레이터 시작 중…",
+    disconnected: "시뮬레이터 응답 없음",
     theme: "테마 전환",
   },
   nav: {
@@ -41,6 +41,7 @@ export const S = {
   common: {
     save: "저장",
     saved: "저장했습니다",
+    savedTo: "파일로 저장했습니다:",
     cancel: "취소",
     delete: "삭제",
     add: "추가",

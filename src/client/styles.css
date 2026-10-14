@@ -575,7 +575,8 @@ table.t td {
   vertical-align: top;
 }
 
-table.t td:first-child {
+table.t td:first-child,
+table.t td.mono {
   white-space: nowrap;
 }
 

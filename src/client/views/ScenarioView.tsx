@@ -1,9 +1,8 @@
 import { useRef, useState } from "react";
 import type { EquipmentType, VendorId } from "../../shared/types";
 import { S } from "../strings";
-import { api } from "../api";
+import { api, saveExport, saveText } from "../api";
 import { act, go, store, toasts, useBoot, useLive } from "../store";
-import { download } from "../format";
 import { Empty, VendorTag } from "../components/ui";
 
 export function ScenarioView() {
@@ -15,7 +14,7 @@ export function ScenarioView() {
 
   const exportScenario = async () => {
     const s = await act(() => api.get("/api/scenario"));
-    if (s) download(`fab-sim-scenario-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(s, null, 2));
+    if (s) await saveText(`fab-sim-scenario-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(s, null, 2));
   };
   const importScenario = async (file: File) => {
     try {
@@ -192,12 +191,12 @@ export function ScenarioView() {
           <div className="card stack">
             <h3>{S.scenario.exports}</h3>
             <div className="row">
-              <a className="btn" href="/api/export/events.csv">
+              <button className="btn" onClick={() => saveExport("/api/export/events.csv")}>
                 {S.scenario.eventsCsv}
-              </a>
-              <a className="btn" href="/api/export/scenario.json">
+              </button>
+              <button className="btn" onClick={() => saveExport("/api/export/scenario.json")}>
                 scenario.json
-              </a>
+              </button>
             </div>
             <p className="muted" style={{ margin: 0 }}>
               Trace CSV: FDC → Run → {S.fdc.csv}

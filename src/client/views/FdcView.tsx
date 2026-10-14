@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FdcAlarmPayload } from "../../shared/types";
 import { S } from "../strings";
-import { api, qs } from "../api";
+import { api, qs, saveExport } from "../api";
 import { act, useBoot, usePoll } from "../store";
 import { fmtNum, fmtTime } from "../format";
 import { LineChart, type Band, type Series } from "../components/LineChart";
@@ -222,9 +222,9 @@ export function FdcView() {
                   ))}
                 </select>
                 <Check label={`${S.fdc.compare} (${prev.length})`} checked={compare} onChange={setCompare} />
-                <a className="btn small" href={`/api/fdc/runs/${encodeURIComponent(run.runId)}/csv`}>
+                <button className="btn small" onClick={() => saveExport(`/api/fdc/runs/${encodeURIComponent(run.runId)}/csv`)}>
                   {S.fdc.csv}
-                </a>
+                </button>
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {run.eqpId}/{run.chamberId} · {run.recipeId} · {S.common.lot} {run.lotId} · {run.waferIds.join(", ")} · <StatePill state={run.status} />

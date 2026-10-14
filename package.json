@@ -2,33 +2,111 @@
   "name": "fab-sim",
   "version": "0.1.0",
   "private": true,
-  "description": "Semiconductor fab equipment simulator: one unified equipment UI, trace/ERD generation, EES/FDC/QMS/AMS",
+  "description": "Semiconductor fab equipment simulator (desktop, offline): one unified equipment UI, trace/ERD generation, EES/FDC/QMS/AMS",
   "type": "module",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "tsx watch --clear-screen=false src/server/main.ts --dev",
-    "build": "tsc --noEmit && vite build",
-    "start": "tsx src/server/main.ts",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-desktop.mjs",
+    "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
-  "dependencies": {
-    "react": "19.2.0",
-    "react-dom": "19.2.0",
-    "tsx": "4.20.6",
-    "ws": "8.22.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "22.18.0",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
-    "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "typescript": "5.9.3",
     "vite": "8.3.0",
     "vitest": "4.1.11"
+  },
+  "productName": "FAB-SIM",
+  "main": "dist/desktop/main.cjs",
+  "author": "Yongwon12",
+  "build": {
+    "appId": "io.github.yongwon12.fabsim",
+    "productName": "FAB-SIM",
+    "copyright": "FAB-SIM — test-only simulator",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/desktop/**",
+      "dist/client/**",
+      "package.json"
+    ],
+    "asar": true,
+    "electronLanguages": [
+      "ko",
+      "en-US",
+      "en"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "FAB-SIM-${version}-mac-universal.${ext}"
+    },
+    "dmg": {
+      "title": "FAB-SIM ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FAB-SIM",
+      "artifactName": "FAB-SIM-${version}-windows-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "FAB-SIM-${version}-windows-portable.${ext}"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Development"
+    },
+    "publish": null
   }
 }

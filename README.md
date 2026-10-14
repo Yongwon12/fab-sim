@@ -8,35 +8,66 @@
 리포트 데이터)** 를 사용자 설정에 따라 생성합니다. 이 데이터는 메시지 버스를 거쳐
 함께 구현된 **EES · FDC · QMS · AMS** 네 시스템으로 전달됩니다.
 
-Node.js 20.19 이상 또는 22.12 이상이 필요합니다.
+**macOS와 Windows용 데스크톱 앱**입니다. 설치 파일을 받아 실행하면 되고,
+설치 후에는 **인터넷 없이** 동작합니다. 웹 서버를 띄우지 않고 네트워크 포트도 열지
+않습니다. 화면과 시뮬레이터는 앱 안에서 IPC로만 통신하며, 창에서 나가는 네트워크
+요청은 모두 차단됩니다.
 
-## 실행
+## 설치 (사용자)
+
+[Releases](https://github.com/Yongwon12/fab-sim/releases) 페이지에서 내 컴퓨터에
+맞는 파일을 받습니다.
+
+| 컴퓨터 | 파일 |
+|---|---|
+| 맥북 (Apple Silicon·Intel 공통) | `FAB-SIM-<버전>-mac-universal.dmg` |
+| Windows 10/11 설치형 | `FAB-SIM-<버전>-windows-setup.exe` |
+| Windows 10/11 설치 없이 실행 | `FAB-SIM-<버전>-windows-portable.exe` |
+
+코드 서명 인증서가 없는 테스트용 빌드라서 처음 한 번은 OS 경고가 나옵니다.
+
+- **macOS**: dmg를 열고 FAB-SIM을 `응용 프로그램` 폴더로 끌어 넣은 뒤 실행합니다.
+  "열 수 없음" 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안** 맨 아래의
+  **"그래도 열기"**를 누릅니다. 또는 터미널에서
+  `xattr -dr com.apple.quarantine /Applications/FAB-SIM.app` 을 실행합니다.
+- **Windows**: "Windows의 PC 보호" 창이 나오면 **추가 정보 → 실행**을 누릅니다.
+
+설비 구성·Fault·시스템 설정은 사용자 폴더에 자동 저장됩니다
+(macOS `~/Library/Application Support/FAB-SIM/`,
+Windows `%APPDATA%\FAB-SIM\`). 데이터 이력과 학습된 모델은 앱을 끄면 지워집니다.
+CSV·시나리오 내보내기는 저장 위치를 묻는 창으로 저장합니다.
+
+## 개발 (빌드하는 사람)
+
+Node.js 20.19 이상 또는 22.12 이상이 필요합니다.
 
 ```sh
 git clone https://github.com/Yongwon12/fab-sim.git
 cd fab-sim
 npm ci                 # .npmrc 에 legacy-peer-deps 가 켜져 있습니다
-npm run dev            # http://127.0.0.1:4870 (UI 핫 리로드)
+npm run dev            # 앱 창이 열립니다 (UI 핫 리로드)
+npm test               # 단위 + 통합 테스트
 ```
 
-배포형 실행:
+설치 파일 만들기:
 
 ```sh
-npm run build          # 타입 검사 + UI 번들 (dist/client)
-npm start              # http://127.0.0.1:4870
+npm run dist:mac       # macOS에서: release/FAB-SIM-<버전>-mac-universal.dmg
+npm run dist:win       # Windows에서: release/…-windows-setup.exe, …-windows-portable.exe
 ```
 
-옵션(`npm start -- --port 5000` 처럼 전달):
+GitHub에서 자동으로 만들 수도 있습니다. `v0.2.0` 처럼 `v`로 시작하는 태그를 push하면
+GitHub Actions가 macOS·Windows 설치 파일을 빌드해 Release에 올립니다
+(`.github/workflows/desktop.yml`). 태그 없이 만들려면 Actions 탭에서
+**Desktop apps → Run workflow**를 누르면 되고, 결과 파일은 실행 기록의 Artifacts에
+올라갑니다.
 
-| 옵션 | 설명 |
+| 폴더 | 내용 |
 |---|---|
-| `--port 4870` `--host 127.0.0.1` | 수신 주소 |
-| `--data ./data` | 시나리오 저장 폴더 (기본 `data/`, git 제외) |
-| `--no-persist` | 저장하지 않음 |
-| `--paused` | 시뮬레이션을 정지 상태로 시작 |
-| `--seed 1234` | 난수 시드 (같은 시드·설정이면 같은 데이터 재현) |
-
-테스트: `npm test` (단위 + 통합, 33개), 타입 검사: `npm run typecheck`
+| `src/desktop` | Electron 메인 프로세스(시뮬레이터 실행, IPC, 저장 창, 네트워크 차단)와 preload |
+| `src/server` | 시뮬레이터, 제조사 어댑터, 메시지 버스, EES·FDC·QMS·AMS |
+| `src/client` | 화면 (React) |
+| `src/shared` | 공통 타입, IPC 계약 |
 
 ## 구성
 
@@ -129,11 +160,13 @@ npm start              # http://127.0.0.1:4870
 ## 한계와 다음 단계
 
 - 실제 HSMS(SEMI E37) 소켓은 열지 않습니다. 원본 프레임은 형식을 보여 주고
-  어댑터 변환을 시험하는 용도입니다. 실제 Host 연결이 필요하면 HSMS 서버를
-  `VendorLink` 앞단에 붙이면 됩니다.
+  어댑터 변환을 시험하는 용도입니다. 실제 설비·Host 연결이 필요하면 HSMS 연결을
+  `VendorLink` 앞단에 붙이면 됩니다(그때는 사내망 포트를 쓰게 됩니다).
 - 버스는 프로세스 내부 구현입니다. MQTT/Kafka 어댑터로 바꾸면 시스템을 별도
   프로세스로 나눌 수 있습니다.
-- 이력·학습 모델은 메모리에만 있습니다(설정만 `data/scenario.json`에 저장).
+- 이력·학습 모델은 메모리에만 있습니다(설정만 사용자 폴더의 `scenario.json`에 저장).
   장기 보관이 필요하면 시계열 DB를 붙이세요.
 - FDC는 단변량 지표만 씁니다. 다변량(T²/PCA) 모델은 다음 단계 후보입니다.
-- 인증·권한이 없습니다. 로컬(127.0.0.1)에서만 쓰세요.
+- 코드 서명·공증(Apple notarization, Windows 인증서)이 없어 첫 실행 때 OS 경고가
+  나옵니다. 배포용으로 쓰려면 인증서를 받아 electron-builder 서명 설정을 추가하세요.
+- 사용자·권한 관리가 없습니다(PC 한 대에서 쓰는 테스트 도구).

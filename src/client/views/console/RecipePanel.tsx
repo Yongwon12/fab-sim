@@ -25,8 +25,9 @@ export function RecipePanel({ cfg, onSave }: { cfg: EquipmentConfig; onSave: (c:
     setDirty(true);
   };
 
+  const [newId, setNewId] = useState<string | null>(null);
   const addRecipe = () => {
-    const id = window.prompt(S.recipe.newRecipeId, `${recipe?.id ?? "RCP"}_COPY`);
+    const id = (newId ?? "").trim();
     if (!id) return;
     if (recipes.some((r) => r.id === id)) {
       toasts.push(`${id} exists`, "error");
@@ -35,6 +36,7 @@ export function RecipePanel({ cfg, onSave }: { cfg: EquipmentConfig; onSave: (c:
     const copy: Recipe = recipe ? { ...structuredClone(recipe), id, name: `${recipe.name} (copy)` } : { id, name: id, steps: [{ name: "Step 1", duration: 10, setpoints: {} }] };
     setRecipes((rs) => [...rs, copy]);
     setSelId(id);
+    setNewId(null);
     setDirty(true);
   };
 
@@ -69,9 +71,29 @@ export function RecipePanel({ cfg, onSave }: { cfg: EquipmentConfig; onSave: (c:
           {S.recipe.total}: {total}s · {S.recipe.defaultRecipe}: {cfg.generation.defaultRecipeId}
         </span>
         <span style={{ flex: 1 }} />
-        <button className="btn" onClick={addRecipe}>
-          + {S.recipe.addRecipe}
-        </button>
+        {newId === null ? (
+          <button className="btn" onClick={() => setNewId(`${recipe.id}_COPY`)}>
+            + {S.recipe.addRecipe}
+          </button>
+        ) : (
+          <>
+            <input
+              autoFocus
+              value={newId}
+              onChange={(e) => setNewId(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addRecipe()}
+              aria-label={S.recipe.newRecipeId}
+              placeholder={S.recipe.newRecipeId}
+              style={{ width: 180 }}
+            />
+            <button className="btn" onClick={addRecipe} disabled={!newId.trim()}>
+              {S.common.add}
+            </button>
+            <button className="btn ghost" onClick={() => setNewId(null)}>
+              {S.common.cancel}
+            </button>
+          </>
+        )}
         <button className="btn danger" onClick={removeRecipe} disabled={recipes.length <= 1}>
           {S.common.delete}
         </button>
